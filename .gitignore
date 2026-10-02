@@ -11,4 +11,3 @@ logs/
 tests/*
 !tests/test_exchange_scheduler.py
 !tests/test_cloud_games.py
-uv.lock
