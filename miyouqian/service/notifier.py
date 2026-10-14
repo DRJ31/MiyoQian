@@ -10,6 +10,7 @@ import html
 import pathlib
 import re
 import smtplib
+import threading
 import time
 from datetime import datetime
 from email.message import EmailMessage
@@ -22,9 +23,11 @@ import httpx
 
 PUSH_TEMPLATE_DIR = pathlib.Path(__file__).resolve().parents[1] / "templates" / "push"
 WECOM_MARKDOWN_MAX_BYTES = 4096
-WECOM_MARKDOWN_TRUNCATION_NOTICE = "\n\n> 内容过长，已截断"
 WECOM_TEXT_MAX_BYTES = 2048
-WECOM_TEXT_TRUNCATION_NOTICE = "\n\n内容过长，已截断"
+WECOM_SEND_INTERVAL = 3.1  # 每个机器人最多 20 条/分钟，留出边界余量。
+_WECOM_REGISTRY_LOCK = threading.Lock()
+_WECOM_SEND_LOCKS: dict[str, threading.Lock] = {}
+_WECOM_NEXT_SEND: dict[str, float] = {}
 
 
 def send_task_push(config: dict[str, Any], lines: list[str]) -> str:
@@ -231,21 +234,11 @@ def _send_exchange(
 
     if provider == "wecombot":
         require(webhook, "webhook")
-        if push.get("plain_text", False):
-            msgtype = "text"
-            content = truncate_wecom_text(build_exchange_text(title, goods_name, result, plan, success))
-        else:
-            msgtype = "markdown"
-            content = truncate_wecom_markdown(build_exchange_markdown(title, goods_name, result, plan, success))
-        request_json(
-            client,
-            "POST",
-            webhook,
-            json={
-                "msgtype": msgtype,
-                msgtype: {"content": content},
-            },
+        plain_text = push.get("plain_text", False)
+        content = (build_exchange_text if plain_text else build_exchange_markdown)(
+            title, goods_name, result, plan, success,
         )
+        send_wecom(client, webhook, "text" if plain_text else "markdown", content)
         return
 
     if provider == "email":
@@ -377,13 +370,11 @@ def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str,
 
     if provider == "wecombot":
         require(webhook, "webhook")
-        if push.get("plain_text", False):
-            msgtype = "text"
-            content = truncate_wecom_text(plain_message)
-        else:
-            msgtype = "markdown"
-            content = truncate_wecom_markdown(markdown_message)
-        request_json(client, "POST", webhook, json={"msgtype": msgtype, msgtype: {"content": content}})
+        plain_text = push.get("plain_text", False)
+        send_wecom(
+            client, webhook, "text" if plain_text else "markdown",
+            plain_message if plain_text else markdown_message,
+        )
         return
 
     if provider == "email":
@@ -1145,26 +1136,56 @@ def truncate_text(text: str, limit: int) -> str:
     return text[: max(limit - 20, 0)] + "\n... 已截断"
 
 
-def truncate_wecom_markdown(text: str) -> str:
-    """将企业微信 Markdown 内容限制为 4096 个 UTF-8 字节。"""
+def _split_wecom_message(text: str, limit: int) -> list[str]:
+    """优先保留完整行，超长单行按 UTF-8 字符边界切分，不丢弃空白。"""
     encoded = text.encode("utf-8")
-    if len(encoded) <= WECOM_MARKDOWN_MAX_BYTES:
-        return text
+    parts: list[str] = []
+    offset = 0
+    while offset < len(encoded):
+        part = encoded[offset:offset + limit].decode("utf-8", errors="ignore")
+        if offset + limit < len(encoded):
+            newline = part.rfind("\n")
+            if newline >= 0:
+                part = part[:newline + 1]
+        parts.append(part)
+        offset += len(part.encode("utf-8"))
+    return parts or [text]
 
-    available = WECOM_MARKDOWN_MAX_BYTES - len(WECOM_MARKDOWN_TRUNCATION_NOTICE.encode("utf-8"))
-    truncated = encoded[:available].decode("utf-8", errors="ignore")
-    return truncated + WECOM_MARKDOWN_TRUNCATION_NOTICE
 
-
-def truncate_wecom_text(text: str) -> str:
-    """将企业微信普通文本限制为 2048 个 UTF-8 字节。"""
-    encoded = text.encode("utf-8")
-    if len(encoded) <= WECOM_TEXT_MAX_BYTES:
-        return text
-
-    available = WECOM_TEXT_MAX_BYTES - len(WECOM_TEXT_TRUNCATION_NOTICE.encode("utf-8"))
-    truncated = encoded[:available].decode("utf-8", errors="ignore")
-    return truncated + WECOM_TEXT_TRUNCATION_NOTICE
+def send_wecom(client: httpx.Client, webhook: str, msgtype: str, content: str) -> None:
+    limit = WECOM_TEXT_MAX_BYTES if msgtype == "text" else WECOM_MARKDOWN_MAX_BYTES
+    parts = _split_wecom_message(content, limit)
+    with _WECOM_REGISTRY_LOCK:
+        lock = _WECOM_SEND_LOCKS.setdefault(webhook, threading.Lock())
+    # 同机器人整批串行，避免定时任务、网页测试、兑换推送交错或并发超限。
+    with lock:
+        for index, part in enumerate(parts, 1):
+            delay = _WECOM_NEXT_SEND.get(webhook, 0) - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            try:
+                try:
+                    response = client.post(webhook, json={"msgtype": msgtype, msgtype: {"content": part}})
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    raise ValueError(f"HTTP {exc.response.status_code}") from None
+                except httpx.RequestError as exc:
+                    # 不暴露带密钥的 Webhook，也不盲目重试可能已经送达的消息。
+                    raise ValueError(type(exc).__name__) from None
+                finally:
+                    _WECOM_NEXT_SEND[webhook] = time.monotonic() + WECOM_SEND_INTERVAL
+                try:
+                    data = response.json()
+                except ValueError:
+                    raise ValueError("企业微信返回了无效 JSON") from None
+                if not isinstance(data, dict) or type(data.get("errcode")) is not int:
+                    raise ValueError("企业微信响应缺少有效 errcode")
+                if data["errcode"] != 0:
+                    raise ValueError(f"企业微信错误码 {data['errcode']}")
+            except ValueError as exc:
+                raise ValueError(
+                    f"第 {index}/{len(parts)} 条发送失败，已成功发送 {index - 1} 条 ({exc})"
+                ) from None
 
 
 def request_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> None:
