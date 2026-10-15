@@ -135,7 +135,8 @@ def _solve_custom(
     try:
         url = custom_endpoint(channel)
         params = {"gt": gt, "challenge": challenge}
-        headers = {"X-API-Key": str(channel.get("api_key") or "").strip()}
+        api_key = str(channel.get("api_key") or "").strip()
+        headers = {"X-API-Key": api_key} if api_key else {}
         timeout = float(channel.get("timeout") or CUSTOM_DEFAULT_TIMEOUT)
         for attempt in range(1, CUSTOM_MAX_ATTEMPTS + 1):
             data, response_headers = client.get_json_any_status(
@@ -208,7 +209,7 @@ def _channel_configured(channel: Mapping[str, Any]) -> bool:
     if provider == "damagou":
         return bool(str(channel.get("userkey") or "").strip())
     if provider == "custom":
-        return bool(str(channel.get("base_url") or "").strip() and str(channel.get("api_key") or "").strip())
+        return bool(str(channel.get("base_url") or "").strip())
     return False
 
 

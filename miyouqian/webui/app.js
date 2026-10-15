@@ -762,7 +762,7 @@ function captchaChannelFields(provider, channel) {
           <input data-captcha-field="base_url" type="text" placeholder="https://gt.example.com" value="${escapeAttr(channel.base_url || "")}" autocomplete="off" />
         </label>
         <label>
-          <span>API Key</span>
+          <span>API Key（选填）</span>
           <input data-captcha-field="api_key" type="password" value="${escapeAttr(channel.api_key || "")}" autocomplete="off" />
         </label>
         <input data-captcha-field="timeout" type="hidden" value="${escapeAttr(channel.timeout || 120)}" />
@@ -839,10 +839,7 @@ function findCaptchaChannel(provider) {
 function hasCaptchaChannelConfig(channel) {
   if (!channel) return false;
   if (channel.provider === "custom") {
-    return Boolean(
-      String(channel.base_url || "").trim() &&
-        String(channel.api_key || "").trim(),
-    );
+    return Boolean(String(channel.base_url || "").trim());
   }
   return Boolean(String(channel.userkey || "").trim());
 }

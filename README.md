@@ -839,14 +839,14 @@ captcha:
 | `channels[].enable` | 是否启用该渠道 |
 | `channels[].userkey` | 打码狗用户 `userkey`（仅 `damagou`） |
 | `channels[].base_url` | 自定义接口的 Base URL，实际请求 `{base_url}/nine`（仅 `custom`） |
-| `channels[].api_key` | 自定义接口的 API Key，通过请求头 `X-API-Key` 发送（仅 `custom`） |
+| `channels[].api_key` | 自定义接口的 API Key，选填；填写后通过请求头 `X-API-Key` 发送，留空则不发送（仅 `custom`） |
 | `channels[].timeout` | 调用打码接口的超时时间，单位秒；`damagou` 默认 60，`custom` 默认 120 |
 
 打码狗的 `type` 默认不需要设置；识别困难时可以在配置文件中给该渠道补 `type: "1006"`，会增加积分消耗。
 
 #### 自定义接口
 
-选择「自定义接口」后，项目会按固定规范调用你填写的打码服务：`GET {base_url}/nine?gt=...&challenge=...`，请求头 `X-API-Key` 鉴权，响应为统一的 `code` / `message` / `request_id` / `data` 信封，`code = 0` 时取 `data.validate` 作为识别结果。完整的请求、响应与错误码规范见 [`miyouqian/webui/custom-captcha-api.md`](miyouqian/webui/custom-captcha-api.md)；在 Web 控制台选中「自定义接口」后，也可以点击「查看规范」在页面内阅读，或点击「复制规范」一键复制全文。
+选择「自定义接口」后，项目会按固定规范调用你填写的打码服务：`GET {base_url}/nine?gt=...&challenge=...`，按需通过请求头 `X-API-Key` 鉴权，响应为统一的 `code` / `message` / `request_id` / `data` 信封，`code = 0` 时取 `data.validate` 作为识别结果。完整的请求、响应与错误码规范见 [`miyouqian/webui/custom-captcha-api.md`](miyouqian/webui/custom-captcha-api.md)；在 Web 控制台选中「自定义接口」后，也可以点击「查看规范」在页面内阅读，或点击「复制规范」一键复制全文。
 
 调用时的处理方式：
 
