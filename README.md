@@ -825,7 +825,7 @@ captcha:
       timeout: 60
     - provider: custom
       enable: false
-      base_url: ""
+      url: ""
       api_key: ""
       timeout: 120
 ```
@@ -838,7 +838,7 @@ captcha:
 | `channels[].provider` | 打码渠道，目前支持 `damagou`、`custom` |
 | `channels[].enable` | 是否启用该渠道 |
 | `channels[].userkey` | 打码狗用户 `userkey`（仅 `damagou`） |
-| `channels[].base_url` | 自定义接口的 Base URL，实际请求 `{base_url}/nine`（仅 `custom`） |
+| `channels[].url` | 自定义接口的完整地址，按填写内容原样请求，路径不限（仅 `custom`） |
 | `channels[].api_key` | 自定义接口的 API Key，选填；填写后通过请求头 `X-API-Key` 发送，留空则不发送（仅 `custom`） |
 | `channels[].timeout` | 调用打码接口的超时时间，单位秒；`damagou` 默认 60，`custom` 默认 120 |
 
@@ -846,13 +846,13 @@ captcha:
 
 #### 自定义接口
 
-选择「自定义接口」后，项目会按固定规范调用你填写的打码服务：`GET {base_url}/nine?gt=...&challenge=...`，按需通过请求头 `X-API-Key` 鉴权，响应为统一的 `code` / `message` / `request_id` / `data` 信封，`code = 0` 时取 `data.validate` 作为识别结果。完整的请求、响应与错误码规范见 [`miyouqian/webui/custom-captcha-api.md`](miyouqian/webui/custom-captcha-api.md)；在 Web 控制台选中「自定义接口」后，也可以点击「查看规范」在页面内阅读，或点击「复制规范」一键复制全文。
+选择「自定义接口」后，项目会按固定规范调用你填写的打码服务：`GET {url}?gt=...&challenge=...`，按需通过请求头 `X-API-Key` 鉴权，响应为统一的 `code` / `message` / `request_id` / `data` 信封，`code = 0` 时取 `data.validate` 作为识别结果。完整的请求、响应与错误码规范见 [`miyouqian/webui/custom-captcha-api.md`](miyouqian/webui/custom-captcha-api.md)；在 Web 控制台选中「自定义接口」后，也可以点击「查看规范」在页面内阅读，或点击「复制规范」一键复制全文。
 
 调用时的处理方式：
 
 - `42901`（频率限制）、`50301` / `50302`（服务繁忙或排队超时）：按响应头 `Retry-After` 等待后重试，等待超过 60 秒则不再等待；`50001` / `50000`：间隔 1 秒重试；单次识别最多请求 3 次。
 - 其余非 `0` 的 `code` 一律视为失败，不会在接口层重试，失败信息会带上 `code` 和 `request_id`（如有）写入日志，随后由下方的「重新获取验证码」流程处理。
-- 配置里的 `base_url` 末尾带 `/` 或 `/nine` 都能正确识别。`api_key` 会在配置变更日志中脱敏，请勿提交到公开仓库。
+- `url` 按填写的完整地址原样请求，不会自动追加路径。`api_key` 会在配置变更日志中脱敏，请勿提交到公开仓库。
 
 识别、校验或提交失败时，会重新获取验证码并重试，最多执行 `max_retries` 次。
 如果打码狗识别接口返回错误且错误信息包含“余额”，任务会按失败状态通过已配置的推送渠道发送“打码狗余额不足”通知。

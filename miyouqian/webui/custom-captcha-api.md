@@ -5,13 +5,13 @@
 ## 1. 请求
 
 ```http
-GET {Base URL}/nine?gt=<gt>&challenge=<challenge> HTTP/1.1
+GET {接口地址}?gt=<gt>&challenge=<challenge> HTTP/1.1
 X-API-Key: <API Key>
 ```
 
 | 项 | 说明 |
 |---|---|
-| Base URL | 用户在客户端中填写，末尾的 `/` 或 `/nine` 会被自动处理 |
+| 接口地址 | 用户在客户端中填写的完整地址，路径不限，客户端不会自动追加路径 |
 | `gt` | 极验验证码参数，客户端原样传入 |
 | `challenge` | 极验验证码参数，客户端原样传入 |
 | `X-API-Key` | 选填。用户在客户端中填写了 API Key 才会发送该请求头，留空则不发送；是否校验由服务端决定 |

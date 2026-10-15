@@ -10,7 +10,6 @@ from typing import Any, Callable, Mapping
 from .http import ApiClient
 
 DAMAGOU_URL = "http://api.damagou.top/apiv1/jiyanRecognize.html"
-CUSTOM_PATH = "/nine"
 CUSTOM_DEFAULT_TIMEOUT = 120
 CUSTOM_MAX_ATTEMPTS = 3
 CUSTOM_MAX_WAIT_SECONDS = 60
@@ -133,7 +132,7 @@ def _solve_custom(
             emit(f"{label}验证码识别失败: {reason}")
 
     try:
-        url = custom_endpoint(channel)
+        url = str(channel.get("url") or "").strip()
         params = {"gt": gt, "challenge": challenge}
         api_key = str(channel.get("api_key") or "").strip()
         headers = {"X-API-Key": api_key} if api_key else {}
@@ -162,14 +161,6 @@ def _solve_custom(
     except Exception as exc:
         fail(str(exc))
     return None
-
-
-def custom_endpoint(channel: Mapping[str, Any]) -> str:
-    """自定义接口的完整请求地址：Base URL 去掉末尾斜杠，并容忍用户直接填到 /nine。"""
-    base = str(channel.get("base_url") or "").strip().rstrip("/")
-    if base.endswith(CUSTOM_PATH):
-        base = base[: -len(CUSTOM_PATH)]
-    return base + CUSTOM_PATH
 
 
 def _response_code(data: Mapping[str, Any]) -> int | None:
@@ -209,7 +200,7 @@ def _channel_configured(channel: Mapping[str, Any]) -> bool:
     if provider == "damagou":
         return bool(str(channel.get("userkey") or "").strip())
     if provider == "custom":
-        return bool(str(channel.get("base_url") or "").strip())
+        return bool(str(channel.get("url") or "").strip())
     return False
 
 

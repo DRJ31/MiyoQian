@@ -669,7 +669,7 @@ function bindCaptchaChannelEvents() {
 function customCaptchaTips() {
   return `
     <div class="captcha-tips">
-      <span>自定义接口需遵循固定的请求与响应规范：GET {Base URL}/nine，请求头 X-API-Key 鉴权，统一 code / data 响应格式。</span>
+      <span>自定义接口需遵循固定的请求与响应规范：GET 请求接口地址并附带 gt / challenge 参数，可选请求头 X-API-Key，统一 code / data 响应格式。</span>
       <div class="captcha-tips-actions">
         <button class="ghost" type="button" data-captcha-doc-view>查看规范</button>
         <button class="ghost" type="button" data-captcha-doc-copy>复制规范</button>
@@ -758,8 +758,8 @@ function captchaChannelFields(provider, channel) {
     return `
       <div class="push-channel-fields form-grid compact">
         <label>
-          <span>Base URL</span>
-          <input data-captcha-field="base_url" type="text" placeholder="https://gt.example.com" value="${escapeAttr(channel.base_url || "")}" autocomplete="off" />
+          <span>接口地址</span>
+          <input data-captcha-field="url" type="text" placeholder="https://gt.example.com/nine" value="${escapeAttr(channel.url || "")}" autocomplete="off" />
         </label>
         <label>
           <span>API Key（选填）</span>
@@ -798,7 +798,7 @@ function emptyCaptchaChannel(provider) {
     return {
       provider,
       enable: true,
-      base_url: "",
+      url: "",
       api_key: "",
       timeout: 120,
     };
@@ -839,7 +839,7 @@ function findCaptchaChannel(provider) {
 function hasCaptchaChannelConfig(channel) {
   if (!channel) return false;
   if (channel.provider === "custom") {
-    return Boolean(String(channel.base_url || "").trim());
+    return Boolean(String(channel.url || "").trim());
   }
   return Boolean(String(channel.userkey || "").trim());
 }

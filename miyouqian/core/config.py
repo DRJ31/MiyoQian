@@ -44,7 +44,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_retries": 3,
         "channels": [
             {"provider": "damagou", "enable": False, "userkey": "", "type": "", "timeout": 60},
-            {"provider": "custom", "enable": False, "base_url": "", "api_key": "", "timeout": 120},
+            {"provider": "custom", "enable": False, "url": "", "api_key": "", "timeout": 120},
         ],
     },
     "schedule": {"enable": False, "time": "09:00", "jitter_minutes": 45, "run_on_start": False},
@@ -348,7 +348,7 @@ def should_keep_push_channel(channel: dict[str, Any]) -> bool:
 
 def default_captcha_channel(provider: str) -> dict[str, Any]:
     if provider == "custom":
-        return {"provider": "custom", "enable": False, "base_url": "", "api_key": "", "timeout": 120}
+        return {"provider": "custom", "enable": False, "url": "", "api_key": "", "timeout": 120}
     return {"provider": "damagou", "enable": False, "userkey": "", "type": "", "timeout": 60}
 
 
@@ -380,7 +380,7 @@ def normalize_captcha_channels(captcha: dict[str, Any]) -> list[dict[str, Any]]:
             "enable": parse_bool(raw.get("enable", captcha.get("enable", False))),
         }
         if provider == "custom":
-            channel["base_url"] = str(raw.get("base_url") or "").strip()
+            channel["url"] = str(raw.get("url") or "").strip()
             channel["api_key"] = str(raw.get("api_key") or "").strip()
         else:
             channel["userkey"] = str(raw.get("userkey") or "")
