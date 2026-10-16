@@ -16,6 +16,7 @@ from email.message import EmailMessage
 from typing import Any, Callable, Optional
 from urllib.parse import quote_plus
 from ..core.onebot import OneBotHTTP
+from ..core.qq_bot import QQBot
 from ..core.captcha import DAMAGOU_BALANCE_INSUFFICIENT_MESSAGE
 
 import httpx
@@ -194,6 +195,10 @@ def _send_exchange(
             raise ValueError(f"QQ推送通道暂不可用，{ex}")
         return
 
+    if provider == "qqbot":
+        send_qq_bot_message(push, build_exchange_text(title, goods_name, result, plan, success))
+        return
+
     if provider == "dingrobot":
         require(webhook, "webhook")
         url = signed_ding_url(webhook, secret) if secret else webhook
@@ -362,6 +367,10 @@ def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str,
         )
         return
 
+    if provider == "qqbot":
+        send_qq_bot_message(push, plain_message)
+        return
+
     if provider == "dingrobot":
         require(webhook, "webhook")
         url = signed_ding_url(webhook, secret) if secret else webhook
@@ -414,6 +423,20 @@ def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str,
 
 def build_push_html(title: str, message: str, success: bool) -> str:
     return render_template("html.html", build_template_context(title, message, success))
+
+
+def send_qq_bot_message(push: dict[str, Any], message: str) -> None:
+    """通过 QQ 开放平台官方机器人（AppID + AppSecret）发送消息。
+
+    和 onebot 版 `qq` 通道不是一回事：那条通道走的是第三方框架的 HTTP API，
+    这条走官方 OpenAPI，需要用户先绑定 user_openid / group_openid。
+    """
+    with QQBot(push) as bot:
+        results = bot.send(message)
+    failures = [item for item in results if "失败" in item]
+    if failures:
+        # 有目标成功时不算失败，但要把问题带出去，避免「推送成功」掩盖掉一半没发出去
+        raise ValueError("；".join(failures))
 
 
 def pushplus_payload(token: str, title: str, content: str, template: str, topic: str = "") -> dict[str, str]:
