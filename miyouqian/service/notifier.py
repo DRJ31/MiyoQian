@@ -32,10 +32,13 @@ _WECOM_NEXT_SEND: dict[str, float] = {}
 
 
 def send_task_push(config: dict[str, Any], lines: list[str]) -> str:
-    """发送签到结果推送，并对打码狗余额不足使用醒目的专用标题。"""
+    """发送签到结果推送，标题要如实反映成败，不能不管有没有失败都说「任务完成」。"""
     balance_insufficient = has_damagou_balance_insufficient(lines)
-    title = "打码狗余额不足" if balance_insufficient else "米游签任务完成"
     success = False if balance_insufficient else is_task_success(lines)
+    if balance_insufficient:
+        title = "打码狗余额不足"
+    else:
+        title = "米游签任务完成" if success else "米游签任务失败"
     return send_push(config, title, "\n".join(lines), success=success)
 
 
@@ -632,7 +635,7 @@ def build_game_section_html(summary: dict[str, Any]) -> str:
     return f"""
     <div style="border:1px solid #d8e4ef;border-radius:8px;padding:14px;background:#ffffff;">
       <div style="font-size:16px;font-weight:800;color:#102033;margin-bottom:8px;">游戏社区签到</div>
-      {progress_html(game["percent"], game["label"], "#168df5")}
+      {segmented_progress_html(game["done_percent"], game["failed_percent"], game["label"], game["color"])}
       <div style="margin-top:8px;color:#627389;font-size:13px;line-height:1.5;">{html.escape(game["summary"] or "无汇总信息")}</div>
       {item_rows}
     </div>
@@ -647,7 +650,7 @@ def build_cloud_game_section_html(summary: dict[str, Any]) -> str:
     return f"""
     <div style="border:1px solid #d8e4ef;border-radius:8px;padding:14px;background:#ffffff;">
       <div style="font-size:16px;font-weight:800;color:#102033;margin-bottom:8px;">云游戏签到</div>
-      {progress_html(cloud["percent"], cloud["label"], "#168df5")}
+      {segmented_progress_html(cloud["done_percent"], cloud["failed_percent"], cloud["label"], cloud["color"])}
       <div style="margin-top:8px;color:#627389;font-size:13px;line-height:1.5;">{html.escape(cloud["summary"] or "无汇总信息")}</div>
       {item_rows}
     </div>
@@ -685,7 +688,7 @@ def build_bbs_section_html(summary: dict[str, Any]) -> str:
             <span style="font-weight:700;color:#102033;">{html.escape(task["name"])}</span>
             <span style="float:right;color:{html.escape(task["color"])};">{html.escape(task["label"])} · {task["done"]}/{task["total"]}</span>
           </div>
-          {progress_html(task["percent"], "", task["color"], compact=True)}
+          {segmented_progress_html(task["done_percent"], task["failed_percent"], "", compact=True)}
         </div>
         """.strip()
         for task in bbs["tasks"]
@@ -728,6 +731,40 @@ def progress_html(percent: int, label: str, color: str, compact: bool = False) -
     """.strip()
 
 
+def segmented_progress_html(
+    done_percent: int,
+    failed_percent: int,
+    label: str,
+    label_color: str = "#627389",
+    compact: bool = False,
+) -> str:
+    """红蓝分段进度条：蓝色段是成功比例，红色段是失败比例，两段宽度之和才是整体完成度。
+
+    这样即便有失败项，只要尝试都跑完了，颜色比例仍能如实反映「大部分成功/大部分失败」，
+    不会像单色进度条那样一有失败就整条变红，掩盖掉已经成功的部分。
+    """
+    done_percent = clamp_percent(done_percent)
+    failed_percent = clamp_percent(failed_percent)
+    if done_percent + failed_percent > 100:
+        failed_percent = max(100 - done_percent, 0)
+    height = 6 if compact else 8
+    label_html = (
+        f'<div style="margin-top:5px;color:{html.escape(label_color)};font-size:12px;font-weight:700;">'
+        f"{html.escape(label)}</div>"
+        if label
+        else ""
+    )
+    return f"""
+    <div>
+      <div style="height:{height}px;border-radius:999px;background:#d8e4ef;overflow:hidden;display:flex;">
+        <div style="width:{done_percent}%;height:{height}px;background:#168df5;"></div>
+        <div style="width:{failed_percent}%;height:{height}px;background:#b83b4b;"></div>
+      </div>
+      {label_html}
+    </div>
+    """.strip()
+
+
 def build_game_section_text(summary: dict[str, Any], markdown: bool = False) -> str:
     game = summary["game"]
     if not game["present"]:
@@ -745,7 +782,7 @@ def build_cloud_game_section_text(summary: dict[str, Any], markdown: bool = Fals
 def build_result_section_text(result: dict[str, Any], fallback_summary: str) -> str:
     lines = [
         f"- {result['summary'] or fallback_summary}",
-        f"- 进度 {text_bar(result['percent'])} {result['label']}",
+        f"- 进度 {segmented_text_bar(result['done_percent'], result['failed_percent'])} {result['label']}",
     ]
     for item in result["failed_items"][:6]:
         lines.append(f"- 失败：{item}")
@@ -763,7 +800,8 @@ def build_bbs_section_text(summary: dict[str, Any], markdown: bool = False) -> s
         f"- 米游币数量：实际已获得 {bbs['actual_points']}，本次新增 {bbs['gained_points']}，当前总计 {bbs['total_points'] or '-'}",
     ]
     for task in bbs["tasks"]:
-        lines.append(f"- {task['name']} {text_bar(task['percent'])} {task['label']} ({task['done']}/{task['total']})")
+        bar = segmented_text_bar(task["done_percent"], task["failed_percent"])
+        lines.append(f"- {task['name']} {bar} {task['label']} ({task['done']}/{task['total']})")
     if bbs["summary"]:
         lines.append(f"- {bbs['summary']}")
     return "\n".join(lines)
@@ -837,18 +875,46 @@ def build_account_summary(label: str, lines: list[str], success: bool) -> dict[s
     }
 
 
+def summarize_attempts(done: int, failed: int, total: int) -> dict[str, Any]:
+    """根据成功/失败/预期总数算出展示状态，游戏签到和米游币任务共用同一套判定。
+
+    只要该跑的尝试都跑完了就算「完成」（蓝色），即使中间有失败——失败的比例由
+    进度条自己的红色分段体现，不需要靠整体状态变红来提示，否则 3 次里 2 次成功
+    1 次失败也会被标成「失败」，看起来像是整体没完成。只有全部尝试都失败才整体
+    标「失败」，还没跑完全部尝试则是「部分完成」/「未执行」。
+    """
+    total = max(total, 0)
+    attempted = done + failed
+    done_percent = round(done / total * 100) if total else 0
+    failed_percent = round(failed / total * 100) if total else 0
+    if attempted == 0:
+        label, color = "未执行", "#627389"
+    elif attempted < total:
+        label, color = "部分完成", "#a86d12"
+    elif done == 0:
+        label, color = f"失败 {failed}", "#b83b4b"
+    else:
+        label, color = "完成", "#168df5"
+    return {"done_percent": done_percent, "failed_percent": failed_percent, "label": label, "color": color}
+
+
 def build_result_summary(summary: str, success_items: list[str], failed_items: list[str], success: bool) -> dict[str, Any]:
     counts = parse_counts(summary)
-    total = sum(counts)
-    percent = round(counts[0] / total * 100) if total else (100 if success and summary else 0)
+    done, failed, total = counts[0], counts[1], sum(counts)
+    if not total:
+        done, failed = len(success_items), len(failed_items)
+        total = done + failed
+    status = summarize_attempts(done, failed, total)
     return {
         "present": bool(summary or success_items or failed_items),
         "summary": summary,
-        "success": counts[0],
-        "failed": counts[1],
+        "success": done,
+        "failed": failed,
         "skipped": counts[2],
-        "percent": percent,
-        "label": f"{counts[0]}/{total or counts[0]} 成功",
+        "done_percent": status["done_percent"],
+        "failed_percent": status["failed_percent"],
+        "label": status["label"],
+        "color": status["color"],
         "items": success_items,
         "failed_items": failed_items,
     }
@@ -926,27 +992,16 @@ def task_progress(
         total = max(done + failed, 1)
     else:
         total = max(target, 1)
-    percent = round(done / total * 100)
-    if failed:
-        label = f"失败 {failed}"
-        color = "#b83b4b"
-    elif done >= total:
-        label = "完成"
-        color = "#168df5"
-    elif done > 0:
-        label = "部分完成"
-        color = "#a86d12"
-    else:
-        label = "未执行"
-        color = "#627389"
+    status = summarize_attempts(done, failed, total)
     return {
         "name": name,
         "done": min(done, total),
         "total": total,
         "failed": failed,
-        "percent": percent,
-        "label": label,
-        "color": color,
+        "done_percent": status["done_percent"],
+        "failed_percent": status["failed_percent"],
+        "label": status["label"],
+        "color": status["color"],
     }
 
 
@@ -1048,6 +1103,18 @@ def text_bar(percent: int) -> str:
     percent = clamp_percent(percent)
     filled = round(percent / 10)
     return "[" + "#" * filled + "-" * (10 - filled) + f"] {percent}%"
+
+
+def segmented_text_bar(done_percent: int, failed_percent: int) -> str:
+    """纯文本版红蓝分段进度条：`#` 是成功比例，`x` 是失败比例，`-` 是剩余部分。"""
+    done_percent = clamp_percent(done_percent)
+    failed_percent = clamp_percent(failed_percent)
+    if done_percent + failed_percent > 100:
+        failed_percent = max(100 - done_percent, 0)
+    done_filled = min(round(done_percent / 10), 10)
+    failed_filled = min(round(failed_percent / 10), 10 - done_filled)
+    empty = 10 - done_filled - failed_filled
+    return "[" + "#" * done_filled + "x" * failed_filled + "-" * empty + f"] {done_percent}%"
 
 
 def shorten_text(text: str, limit: int) -> str:

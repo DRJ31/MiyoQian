@@ -162,6 +162,44 @@ class NormalizeMessageLinesTest(unittest.TestCase):
         self.assertEqual(notifier.normalize_message_lines(message), ["签到成功，奖励 60原石"])
 
 
+class TaskProgressStatusTest(unittest.TestCase):
+    """推送里游戏签到/米游币任务的进度条：跑完了就算完成，不因为部分失败就整体变红。"""
+
+    def test_mixed_result_after_all_attempts_counts_as_done(self) -> None:
+        # 3 次尝试，2 次失败 1 次成功：应该算「完成」（蓝色），失败比例交给分段进度条体现。
+        status = notifier.summarize_attempts(done=1, failed=2, total=3)
+        self.assertEqual("完成", status["label"])
+        self.assertEqual("#168df5", status["color"])
+        self.assertEqual(33, status["done_percent"])
+        self.assertEqual(67, status["failed_percent"])
+
+    def test_total_failure_is_still_labeled_failed(self) -> None:
+        status = notifier.summarize_attempts(done=0, failed=3, total=3)
+        self.assertEqual("失败 3", status["label"])
+        self.assertEqual("#b83b4b", status["color"])
+
+    def test_html_progress_bar_renders_both_color_segments(self) -> None:
+        bar = notifier.segmented_progress_html(33, 67, "完成", "#168df5")
+        self.assertIn("width:33%", bar)
+        self.assertIn("background:#168df5", bar)
+        self.assertIn("width:67%", bar)
+        self.assertIn("background:#b83b4b", bar)
+
+    def test_text_progress_bar_uses_hash_and_x_markers(self) -> None:
+        self.assertEqual("[###xxxxxxx] 33%", notifier.segmented_text_bar(33, 67))
+
+    def test_push_title_reflects_failure_instead_of_always_saying_completed(self) -> None:
+        lines = [
+            "# 账号 1/1: 沐晨",
+            "游戏签到汇总：成功 2，失败 1，跳过 0",
+            "游戏失败项：原神 触发验证码",
+        ]
+        with patch.object(notifier, "send_push", return_value="sent") as send_push:
+            notifier.send_task_push({"push": {"enable": True}}, lines)
+        self.assertEqual("米游签任务失败", send_push.call_args.args[1])
+        self.assertFalse(send_push.call_args.kwargs["success"])
+
+
 class PushChannelConfigTest(unittest.TestCase):
     def test_serverchan_fields_are_normalized(self):
         channels = normalize_push_channels(
