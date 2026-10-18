@@ -147,12 +147,12 @@ def _send_exchange(
             token, title, build_exchange_html(title, goods_name, result, plan, success), "html", topic
         )
         try:
-            request_json(client, "POST", url, json=payload)
+            request_pushplus(client, url, payload)
         except Exception:
             payload = pushplus_payload(
                 token, title, build_exchange_markdown(title, goods_name, result, plan, success), "markdown", topic
             )
-            request_json(client, "POST", url, json=payload)
+            request_pushplus(client, url, payload)
         return
 
     if provider == "serverchan":
@@ -338,9 +338,9 @@ def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str,
         url = "https://www.pushplus.plus/send"
         payload = pushplus_payload(token, title, build_push_html(title, message, success), "html", topic)
         try:
-            request_json(client, "POST", url, json=payload)
+            request_pushplus(client, url, payload)
         except Exception:
-            request_json(client, "POST", url, json=pushplus_payload(token, title, markdown_message, "markdown", topic))
+            request_pushplus(client, url, pushplus_payload(token, title, markdown_message, "markdown", topic))
         return
 
     if provider == "serverchan":
@@ -1131,7 +1131,9 @@ def build_feishu_post(title: str, message: str, success: bool) -> dict[str, Any]
 
 def normalize_message_lines(message: str) -> list[str]:
     normalized = message.replace("\r\n", "\n").replace("\r", "\n")
-    return [line.rstrip() for line in normalized.split("\n") if line.strip()]
+    lines = [line.rstrip() for line in normalized.split("\n") if line.strip()]
+    # "正在..." 只是进度提示，紧跟着的结果行已经说明了成败，推送里留着只会让内容变长
+    return [line for line in lines if not line.lstrip().startswith("正在")]
 
 
 def extract_summary(lines: list[str], success: bool) -> list[str]:
@@ -1272,6 +1274,18 @@ def send_wecom(client: httpx.Client, webhook: str, msgtype: str, content: str) -
 def request_json(client: httpx.Client, method: str, url: str, **kwargs: Any) -> None:
     response = client.request(method, url, **kwargs)
     response.raise_for_status()
+
+
+def request_pushplus(client: httpx.Client, url: str, payload: dict[str, str]) -> None:
+    """pushplus 内容过大等业务错误仍返回 HTTP 200，必须看 code 才能判断成败。"""
+    response = client.request("POST", url, json=payload)
+    response.raise_for_status()
+    try:
+        data = response.json()
+    except ValueError:
+        return
+    if isinstance(data, dict) and data.get("code") not in (200, None):
+        raise ValueError(f"{data.get('msg') or '请求失败'}: {data.get('data') or ''}".strip(": "))
 
 
 def require(value: str, name: str) -> None:
