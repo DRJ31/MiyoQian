@@ -180,10 +180,8 @@ class TaskProgressStatusTest(unittest.TestCase):
 
     def test_html_progress_bar_renders_both_color_segments(self) -> None:
         bar = notifier.segmented_progress_html(33, 67, "完成", "#168df5")
-        self.assertIn("width:33%", bar)
-        self.assertIn("background:#168df5", bar)
-        self.assertIn("width:67%", bar)
-        self.assertIn("background:#b83b4b", bar)
+        self.assertIn("#168df5 0 33%", bar)
+        self.assertIn("#b83b4b 33% 100%", bar)
 
     def test_text_progress_bar_uses_hash_and_x_markers(self) -> None:
         self.assertEqual("[###xxxxxxx] 33%", notifier.segmented_text_bar(33, 67))
