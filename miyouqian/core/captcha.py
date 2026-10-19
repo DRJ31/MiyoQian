@@ -14,10 +14,10 @@ CUSTOM_DEFAULT_TIMEOUT = 120
 CUSTOM_MAX_ATTEMPTS = 3
 CUSTOM_MAX_WAIT_SECONDS = 60
 CUSTOM_DEFAULT_RETRY_AFTER = 5
-# 限流 / 排队类错误：按 Retry-After 等待后重试
+# 限流 / 排队类错误：服务端还没开始识别，challenge 没被消耗，可以按 Retry-After 等待后原样重试。
+# 50001 / 50000 不在此列：极验的 challenge 用过一次就作废，识别可能已经提交过，
+# 原样重发只会被秒拒 (old challenge)，必须交给调用方重新取一个新验证码。
 CUSTOM_RETRY_WITH_DELAY = {42901, 50301, 50302}
-# 上游或服务内部的瞬时错误：短暂停顿后重试
-CUSTOM_RETRY_IMMEDIATELY = {50001, 50000}
 PROVIDER_LABELS = {
     "damagou": "打码狗",
     "custom": "自定义接口",
@@ -147,14 +147,10 @@ def _solve_custom(
                 if not solution:
                     fail("接口返回成功但缺少 data.validate")
                 return solution
-            if attempt < CUSTOM_MAX_ATTEMPTS:
-                if code in CUSTOM_RETRY_WITH_DELAY:
-                    delay = _retry_after_seconds(response_headers)
-                    if delay <= CUSTOM_MAX_WAIT_SECONDS:
-                        time.sleep(delay)
-                        continue
-                elif code in CUSTOM_RETRY_IMMEDIATELY:
-                    time.sleep(1)
+            if attempt < CUSTOM_MAX_ATTEMPTS and code in CUSTOM_RETRY_WITH_DELAY:
+                delay = _retry_after_seconds(response_headers)
+                if delay <= CUSTOM_MAX_WAIT_SECONDS:
+                    time.sleep(delay)
                     continue
             fail(_format_custom_error(data, code))
             return None
