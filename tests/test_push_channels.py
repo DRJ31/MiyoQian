@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
 import httpx
-
 from miyouqian.core.config import normalize_push_channels
 from miyouqian.service import notifier
 
@@ -338,3 +338,75 @@ class PushChannelConfigTest(unittest.TestCase):
     def test_disabled_empty_channel_is_dropped(self):
         channels = normalize_push_channels({"channels": [{"provider": "serverchan", "enable": False}]})
         self.assertEqual(channels, [])
+
+
+class WebPushTestEndpointTest(unittest.TestCase):
+    """弹窗里的「测试推送」：只测提交的那条通道，不要求先保存或启用。"""
+
+    def _app(self, push):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(lock=threading.Lock(), config={"push": push}, log=Mock())
+
+    @patch("miyouqian.service.web.send_push", return_value="推送结果: wecombot: 成功")
+    def test_submitted_channel_is_tested_even_when_nothing_is_enabled(self, send_push):
+        from miyouqian.service.web import WebApp
+
+        app = self._app({"enable": False, "channels": []})
+        result = WebApp.test_push_channels(
+            app,
+            {"provider": "wecombot", "enable": False, "webhook": "https://example.invalid/bot"},
+        )
+        scoped = send_push.call_args.args[0]
+        self.assertIs(scoped["push"]["enable"], True)
+        self.assertIs(scoped["push"]["error_only"], False)
+        channels = scoped["push"]["channels"]
+        self.assertEqual([channel["provider"] for channel in channels], ["wecombot"])
+        self.assertEqual(channels[0]["webhook"], "https://example.invalid/bot")
+        self.assertTrue(channels[0]["enable"])
+        self.assertIn("成功", result)
+
+    @patch("miyouqian.service.web.send_push")
+    def test_empty_channel_payload_is_rejected(self, send_push):
+        from miyouqian.service.web import WebApp
+
+        app = self._app({"enable": True, "channels": []})
+        with self.assertRaises(ValueError):
+            WebApp.test_push_channels(app, {"provider": "wecombot"})
+        send_push.assert_not_called()
+
+    @patch("miyouqian.service.web.send_push", return_value="推送结果: qq: 成功")
+    def test_only_the_submitted_channel_is_tested(self, send_push):
+        from miyouqian.service.web import WebApp
+
+        # 钉钉和 QQ 都启用，但从 QQ 的弹窗点测试：只能测 QQ
+        app = self._app(
+            {
+                "enable": True,
+                "channels": [
+                    {"provider": "dingrobot", "enable": True, "webhook": "https://example.invalid/ding"},
+                    {
+                        "provider": "qq",
+                        "enable": True,
+                        "push_url": "http://127.0.0.1:3000",
+                        "access_token": "token",
+                        "send_id": "1134741727",
+                    },
+                ],
+            }
+        )
+        WebApp.test_push_channels(
+            app,
+            {
+                "provider": "qq",
+                "enable": True,
+                "push_url": "http://127.0.0.1:3000",
+                "access_token": "token",
+                "send_id": "1134741727",
+                "msg_type": "private",
+            },
+        )
+        config = send_push.call_args.args[0]
+        self.assertEqual(
+            [channel["provider"] for channel in config["push"]["channels"]], ["qq"]
+        )
