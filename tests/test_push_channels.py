@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import httpx
+
 from miyouqian.core.config import normalize_push_channels
 from miyouqian.service import notifier
 
@@ -379,7 +380,6 @@ class WebPushTestEndpointTest(unittest.TestCase):
     def test_only_the_submitted_channel_is_tested(self, send_push):
         from miyouqian.service.web import WebApp
 
-        # 钉钉和 QQ 都启用，但从 QQ 的弹窗点测试：只能测 QQ
         app = self._app(
             {
                 "enable": True,
@@ -410,3 +410,66 @@ class WebPushTestEndpointTest(unittest.TestCase):
         self.assertEqual(
             [channel["provider"] for channel in config["push"]["channels"]], ["qq"]
         )
+
+
+class WebPushTestAllProvidersTest(unittest.TestCase):
+    """9 个推送方式都能单独测试：每个只触发自己那一次发送。"""
+
+    SAMPLES = {
+        "pushplus": {"token": "token"},
+        "serverchan": {"sendkey": "sctp1234tABC"},
+        "telegram": {"token": "123:abc", "chat_id": "42"},
+        "dingrobot": {"webhook": "https://example.invalid/ding"},
+        "feishubot": {"webhook": "https://example.invalid/feishu"},
+        "wecombot": {"webhook": "https://example.invalid/wecom"},
+        "email": {
+            "smtp_host": "smtp.example.com",
+            "smtp_user": "a@example.com",
+            "smtp_password": "secret",
+            "mail_to": "b@example.com",
+        },
+        "qq": {
+            "push_url": "http://127.0.0.1:3000",
+            "access_token": "token",
+            "send_id": "",
+            "msg_type": "private",
+        },
+        "qqbot": {"app_id": "102000000", "client_secret": "secret", "user_openid": "openid"},
+    }
+
+    def test_every_provider_is_sent_alone(self):
+        from types import SimpleNamespace
+
+        from miyouqian.service.web import WebApp
+
+        for provider, fields in self.SAMPLES.items():
+            with self.subTest(provider=provider):
+                app = SimpleNamespace(
+                    lock=threading.Lock(),
+                    config={"push": {"enable": True, "channels": []}},
+                    log=Mock(),
+                )
+                payload = dict(fields, provider=provider, enable=False)
+                with patch(
+                    "miyouqian.service.web.send_push",
+                    return_value=f"推送结果: {provider}: 成功",
+                ) as send_push:
+                    result = WebApp.test_push_channels(app, payload)
+
+                scoped = send_push.call_args.args[0]
+                channels = scoped["push"]["channels"]
+                self.assertEqual([channel["provider"] for channel in channels], [provider])
+                self.assertTrue(channels[0]["enable"])
+                self.assertIs(scoped["push"]["error_only"], False)
+                self.assertIn(f"{provider}: 成功", result)
+
+    def test_all_providers_survive_normalization_with_frontend_fields(self):
+        for provider, fields in self.SAMPLES.items():
+            with self.subTest(provider=provider):
+                channels = normalize_push_channels(
+                    {"channels": [dict(fields, provider=provider, enable=True)]}
+                )
+                self.assertEqual(len(channels), 1)
+                self.assertEqual(channels[0]["provider"], provider)
+                for key, value in fields.items():
+                    self.assertEqual(str(channels[0].get(key, "")), str(value))
