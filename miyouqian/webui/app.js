@@ -75,6 +75,7 @@ let editingAccountIndex = null;
 let expandedCloudAccounts = new Set();
 let pushModalProvider = null; // 当前在弹窗里配置的推送通道，null 表示弹窗关闭
 let pushModalEl = null;       // 弹窗遮罩层元素
+let pushModalDraft = null;    // 弹窗里还没保存的输入；点「保存」前不写进 config
 let taskModalKind = null;     // 当前在弹窗里配置的任务（game / cloud / bbs）
 let taskModalEl = null;
 let qqBindState = null;
@@ -397,6 +398,7 @@ function openPushChannelModal(provider) {
   const channel = findPushChannel(provider);
   const label = pushChannelLabel(provider);
   pushModalProvider = provider;
+  pushModalDraft = channel ? { ...channel } : null;
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.innerHTML = `
@@ -439,9 +441,7 @@ function openPushChannelModal(provider) {
   const toast = document.querySelector(".toast");
   document.body.insertBefore(overlay, toast || null);
   pushModalEl = overlay;
-  overlay.addEventListener("click", (event) => {
-    if (event.target === overlay) closePushChannelModal();
-  });
+  closeOnBackdropClick(overlay, closePushChannelModal);
   overlay.querySelectorAll("[data-push-modal-close]").forEach((button) => {
     button.addEventListener("click", () => closePushChannelModal());
   });
@@ -483,20 +483,44 @@ function closePushChannelModal() {
   pushModalEl.remove();
   pushModalEl = null;
   pushModalProvider = null;
+  pushModalDraft = null;
+}
+
+// 只有点遮罩本身才关：在输入框里按下、拖到遮罩上松手也会触发 click，那样会丢掉已填的内容
+function closeOnBackdropClick(overlay, close) {
+  let pressedOnBackdrop = false;
+  overlay.addEventListener("mousedown", (event) => {
+    pressedOnBackdrop = event.target === overlay;
+  });
+  overlay.addEventListener("click", (event) => {
+    if (pressedOnBackdrop && event.target === overlay) close();
+  });
+}
+
+// 把弹窗当前填的内容收进草稿。轮询绑定进度、重新拉配置都会重画弹窗，
+// 重画前先收一次，没保存的输入和「启用此通道」才不会被配置里的旧值冲掉
+function captureModalDraft() {
+  if (!pushModalProvider || !pushModalEl) return pushModalDraft;
+  const card = pushModalEl.querySelector("[data-push-provider]");
+  if (!card || !card.querySelector("[data-push-field]")) return pushModalDraft;
+  pushModalDraft = cleanPushChannel(collectPushChannel(card));
+  return pushModalDraft;
 }
 
 function renderPushChannelModal() {
   if (!pushModalProvider || !pushModalEl) return;
   const provider = pushModalProvider;
-  const channel = findPushChannel(provider);
+  const body = pushModalEl.querySelector("[data-push-modal-body]");
+  if (!body) return;
+  captureModalDraft();
+  const saved = findPushChannel(provider);
+  const channel = pushModalDraft || saved;
   const toggle = pushModalEl.querySelector("[data-push-toggle]");
   if (toggle) toggle.checked = Boolean(channel?.enable);
   const errorOnly = pushModalEl.querySelector("[data-push-error-only]");
   if (errorOnly) errorOnly.checked = Boolean(config.push?.error_only);
   const state = pushModalEl.querySelector("[data-push-modal-state]");
-  if (state) state.textContent = pushChannelStateText(channel);
-  const body = pushModalEl.querySelector("[data-push-modal-body]");
-  if (!body) return;
+  if (state) state.textContent = pushChannelStateText(saved);
   body.innerHTML = `
     ${provider === "qqbot" ? qqBotBindPanel() : ""}
     ${pushChannelFields(provider, channel || emptyPushChannel(provider))}
@@ -627,9 +651,7 @@ function openTaskModal(kind) {
   const toast = document.querySelector(".toast");
   document.body.insertBefore(overlay, toast || null);
   taskModalEl = overlay;
-  overlay.addEventListener("click", (event) => {
-    if (event.target === overlay) closeTaskModal();
-  });
+  closeOnBackdropClick(overlay, closeTaskModal);
   overlay.querySelectorAll("[data-task-modal-close]").forEach((button) => {
     button.addEventListener("click", () => closeTaskModal());
   });
@@ -944,11 +966,12 @@ async function startQqBind(target) {
     showToast("已有绑定正在进行，请稍候");
     return;
   }
-  // 弹窗里刚填的 AppID/AppSecret 还没保存，先收进内存再校验
-  syncPushChannelFromModal();
+  // 弹窗里刚填的 AppID/AppSecret 还没保存，只收进弹窗草稿用来校验，
+  // 不写进 config，这样绑定途中点「取消」不会被之后的自动保存带上磁盘
+  captureModalDraft();
   collectConfig();
   const channel = cleanPushChannel(
-      findPushChannel("qqbot") || emptyPushChannel("qqbot"),
+      pushModalDraft || findPushChannel("qqbot") || emptyPushChannel("qqbot"),
   );
   if (!channel.app_id || !channel.client_secret) {
     throw new Error("请先填写 AppID 和 AppSecret 再绑定");
@@ -1013,6 +1036,8 @@ function finishQqBind(state) {
     // 让页面显示的 AppID/AppSecret/OpenID 和磁盘上的保持一致
     loadConfig()
         .then(() => {
+          // 服务端已把 AppID/AppSecret/OpenID 写盘，弹窗改回显示磁盘上的值
+          if (pushModalProvider === "qqbot") pushModalDraft = null;
           renderPushChannels();
           showToast(`已绑定并保存${target === "group" ? "群聊" : "私聊"} OpenID`);
         })
@@ -1052,6 +1077,8 @@ function hasPushChannelConfig(channel) {
   if (!channel) return false;
   // 直接按该通道支持的字段判断，避免漏掉 sendkey 这类只在少数通道出现的键
   return pushChannelFieldNames(channel.provider).some((key) => {
+    // 推送方式是下拉框，没填别的参数时也总有值，不能算「已配置」
+    if (key === "msg_type") return false;
     if (key === "smtp_port") return Number(channel[key] || 465) !== 465;
     if (key === "smtp_ssl") return channel[key] === false;
     if (key === "message_format") return channel[key] === "markdown";
@@ -1108,7 +1135,7 @@ function cleanPushChannel(channel) {
 function shouldSavePushChannel(channel) {
   if (channel.enable) return true;
   return pushChannelFieldNames(channel.provider).some((key) => {
-    if (key === "smtp_ssl") return false;
+    if (key === "smtp_ssl" || key === "msg_type") return false;
     if (key === "smtp_port") return Number(channel[key] || 465) !== 465;
     // message_format 默认是 text，只有用户主动改成 markdown 才算配置过
     if (key === "message_format") return String(channel[key] || "") === "markdown";
