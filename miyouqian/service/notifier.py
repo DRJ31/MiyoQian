@@ -270,6 +270,10 @@ def _send_exchange(
         )
         return
 
+    if provider == "gotify":
+        send_gotify(client, push, title, build_exchange_markdown(title, goods_name, result, plan, success))
+        return
+
     raise ValueError(f"不支持的推送通道: {provider}")
 
 
@@ -414,7 +418,39 @@ def _send(client: httpx.Client, provider: str, push: dict[str, Any], title: str,
         )
         return
 
+    if provider == "gotify":
+        send_gotify(client, push, title, markdown_message)
+        return
+
     raise ValueError(f"不支持的推送通道: {provider}")
+
+
+def send_gotify(client: httpx.Client, push: dict[str, Any], title: str, message: str) -> None:
+    """发送 Gotify 通知。"""
+    server = str(push.get("server") or "").strip().rstrip("/")
+    token = str(push.get("token") or "").strip()
+    require(server, "server")
+    require(token, "token")
+    priority = push.get("priority")
+    if priority is None:
+        priority = 5
+    else:
+        try:
+            priority = int(priority)
+        except (TypeError, ValueError):
+            priority = 5
+    request_json(
+        client,
+        "POST",
+        f"{server}/message?token={token}",
+        json={
+            "title": title,
+            "message": message,
+            "priority": priority,
+            # Gotify 默认按纯文本展示，要让它渲染 Markdown 得显式声明 content type
+            "extras": {"client::display": {"contentType": "text/markdown"}},
+        },
+    )
 
 
 def build_push_html(title: str, message: str, success: bool) -> str:

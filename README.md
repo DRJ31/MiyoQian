@@ -1107,6 +1107,27 @@ push:
 
 多个收件人通常可以用英文逗号分隔。
 
+### Gotify
+
+需要填写：
+
+- 服务器地址（Gotify 服务的访问地址，不含 `/message` 路径）
+- App Token（在 Gotify 后台创建应用后获得）
+
+示例：
+
+```yaml
+push:
+  channels:
+    - provider: gotify
+      enable: true
+      server: "http://gotify.example.com"
+      token: "你的 App Token"
+      priority: 5   # 优先级 0-10，可选，默认 5
+```
+
+消息正文使用 Markdown 格式，Gotify 原生支持。
+
 ## 推荐使用流程
 
 第一次使用建议这样做：

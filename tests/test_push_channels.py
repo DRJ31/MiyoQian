@@ -84,6 +84,42 @@ class ServerChanSendTest(unittest.TestCase):
         self.assertTrue(ctx.exception.__suppress_context__)
 
 
+class GotifySendTest(unittest.TestCase):
+    def _client(self):
+        response = Mock()
+        response.raise_for_status = Mock()
+        client = Mock()
+        client.request.return_value = response
+        return client
+
+    def test_sends_markdown_content_type_and_priority(self):
+        client = self._client()
+        notifier.send_gotify(
+            client,
+            {"server": "http://gotify.example.com/", "token": "abc", "priority": 8},
+            "标题",
+            "# 正文",
+        )
+        args, kwargs = client.request.call_args
+        self.assertEqual(args[0], "POST")
+        self.assertEqual(args[1], "http://gotify.example.com/message?token=abc")
+        self.assertEqual(
+            kwargs["json"],
+            {
+                "title": "标题",
+                "message": "# 正文",
+                "priority": 8,
+                "extras": {"client::display": {"contentType": "text/markdown"}},
+            },
+        )
+
+    def test_priority_defaults_to_five(self):
+        client = self._client()
+        notifier.send_gotify(client, {"server": "http://g.example.com", "token": "t"}, "标题", "正文")
+        kwargs = client.request.call_args.kwargs
+        self.assertEqual(kwargs["json"]["priority"], 5)
+
+
 class ServerChanRoutingTest(unittest.TestCase):
     def setUp(self):
         self.send = self.enterContext(patch.object(notifier, "serverchan_send"))
@@ -435,6 +471,7 @@ class WebPushTestAllProvidersTest(unittest.TestCase):
             "msg_type": "private",
         },
         "qqbot": {"app_id": "102000000", "client_secret": "secret", "user_openid": "openid"},
+        "gotify": {"server": "http://gotify.example.invalid", "token": "abc"},
     }
 
     def test_every_provider_is_sent_alone(self):

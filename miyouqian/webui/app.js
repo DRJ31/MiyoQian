@@ -28,6 +28,7 @@ const pushChannelOptions = [
   ["email", "邮箱"],
   ["qq", "QQ推送"],
   ["qqbot", "QQ机器人（QQ开放平台）"],
+  ["gotify", "Gotify"],
 ];
 
 // 通道图标放在 /assets/push/，文件名和通道 provider 一一对应
@@ -41,6 +42,7 @@ const pushChannelIconFiles = {
   email: "email.svg",
   qq: "qq.svg",
   qqbot: "qqbot.svg",
+  gotify: "gotify.svg",
 };
 
 // 供测试断言渠道清单；应用自身不读这个导出
@@ -848,6 +850,8 @@ function pushChannelFields(provider, channel) {
     mail_from: channel.mail_from || "",
     mail_to: channel.mail_to || "",
     smtp_ssl: channel.smtp_ssl ?? true,
+    server: channel.server || "",
+    priority: channel.priority || 5,
   };
   const field = (name, label, type = "text") => `
     <label>
@@ -939,6 +943,11 @@ function pushChannelFields(provider, channel) {
       field("mail_from", "发件人"),
       field("mail_to", "收件人"),
       checkbox("smtp_ssl", "使用 SSL"),
+    ],
+    gotify: [
+      field("server", "服务器地址"),
+      field("token", "App Token", "password"),
+      field("priority", "优先级", "number"),
     ],
   };
 
@@ -1110,6 +1119,7 @@ function hasPushChannelConfig(channel) {
   return pushChannelFieldNames(channel.provider).some((key) => {
     // 推送方式是下拉框，没填别的参数时也总有值，不能算「已配置」
     if (key === "msg_type") return false;
+    if (key === "priority") return false;
     if (key === "smtp_port") return Number(channel[key] || 465) !== 465;
     if (key === "smtp_ssl") return channel[key] === false;
     if (key === "message_format") return channel[key] === "markdown";
@@ -1137,6 +1147,7 @@ function pushChannelFieldNames(provider) {
       "mail_to",
       "smtp_ssl",
     ],
+    gotify: ["server", "token", "priority"],
   };
   return fields[provider] || [];
 }
@@ -1166,7 +1177,7 @@ function cleanPushChannel(channel) {
 function shouldSavePushChannel(channel) {
   if (channel.enable) return true;
   return pushChannelFieldNames(channel.provider).some((key) => {
-    if (key === "smtp_ssl" || key === "msg_type") return false;
+    if (key === "smtp_ssl" || key === "msg_type" || key === "priority") return false;
     if (key === "smtp_port") return Number(channel[key] || 465) !== 465;
     // message_format 默认是 text，只有用户主动改成 markdown 才算配置过
     if (key === "message_format") return String(channel[key] || "") === "markdown";
