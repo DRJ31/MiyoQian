@@ -42,7 +42,7 @@ const pushChannelIconFiles = {
   email: "email.svg",
   qq: "qq.svg",
   qqbot: "qqbot.svg",
-  gotify: "gotify.svg",
+  gotify: "gotify.png",
 };
 
 // 通道字段的默认值：取值等于默认值不算「已配置」。
