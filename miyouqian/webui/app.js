@@ -45,9 +45,25 @@ const pushChannelIconFiles = {
   gotify: "gotify.svg",
 };
 
-// 供测试断言渠道清单；应用自身不读这个导出
+// 通道字段的默认值：取值等于默认值不算「已配置」。
+// 和后端 config.py 的 PUSH_CHANNEL_DEFAULTS 一一对应（这里的值统一是字符串），测试会校验两边一致
+const pushChannelDefaults = {
+  qqbot: { message_format: "text" },
+  gotify: { priority: "5" },
+};
+
+// 取值非空且不等于默认值，才算用户配置过这个字段。
+// 数字 0 是有效取值；布尔 false（如 plain_text 的默认值）当作没填
+function pushFieldConfigured(channel, key) {
+  const raw = channel[key];
+  const value = raw === false ? "" : String(raw ?? "").trim();
+  return value !== "" && value !== pushChannelDefaults[channel.provider]?.[key];
+}
+
+// 供测试断言渠道清单和默认值；应用自身不读这些导出
 if (typeof globalThis !== "undefined") {
   globalThis.__myqPushChannelOptions = pushChannelOptions;
+  globalThis.__myqPushChannelDefaults = pushChannelDefaults;
 }
 
 const captchaChannelOptions = [
@@ -841,7 +857,7 @@ function pushChannelFields(provider, channel) {
     client_secret: channel.client_secret || "",
     user_openid: channel.user_openid || "",
     group_openid: channel.group_openid || "",
-    message_format: channel.message_format || "text",
+    message_format: channel.message_format || pushChannelDefaults.qqbot.message_format,
     api_base: channel.api_base || "",
     smtp_host: channel.smtp_host || "",
     smtp_port: channel.smtp_port || 465,
@@ -851,12 +867,13 @@ function pushChannelFields(provider, channel) {
     mail_to: channel.mail_to || "",
     smtp_ssl: channel.smtp_ssl ?? true,
     server: channel.server || "",
-    priority: channel.priority || 5,
+    // 0 是合法的最低优先级，不能用 || 回退到默认值
+    priority: String(channel.priority ?? "").trim() || pushChannelDefaults.gotify.priority,
   };
-  const field = (name, label, type = "text") => `
+  const field = (name, label, type = "text", attrs = "") => `
     <label>
       <span>${label}</span>
-      <input data-push-field="${name}" type="${type}" value="${escapeAttr(common[name] || "")}" autocomplete="off" />
+      <input data-push-field="${name}" type="${type}" value="${escapeAttr(common[name] || "")}" ${attrs} autocomplete="off" />
     </label>
   `;
   const selectBox = (name, label, options) => `
@@ -947,7 +964,7 @@ function pushChannelFields(provider, channel) {
     gotify: [
       field("server", "服务器地址"),
       field("token", "App Token", "password"),
-      field("priority", "优先级", "number"),
+      field("priority", "优先级（0-10，默认 5）", "number", 'min="0" max="10" step="1"'),
     ],
   };
 
@@ -1119,12 +1136,10 @@ function hasPushChannelConfig(channel) {
   return pushChannelFieldNames(channel.provider).some((key) => {
     // 推送方式是下拉框，没填别的参数时也总有值，不能算「已配置」
     if (key === "msg_type") return false;
-    if (key === "priority") return false;
     if (key === "smtp_port") return Number(channel[key] || 465) !== 465;
     if (key === "smtp_ssl") return channel[key] === false;
-    if (key === "message_format") return channel[key] === "markdown";
     if (key === "plain_text") return Boolean(channel[key]);
-    return String(channel[key] || "").trim();
+    return pushFieldConfigured(channel, key);
   });
 }
 
@@ -1168,7 +1183,8 @@ function cleanPushChannel(channel) {
     } else if (key === "message_format") {
       cleaned[key] = channel[key] === "markdown" ? "markdown" : "text";
     } else {
-      cleaned[key] = String(channel[key] || "").trim();
+      // 用 ?? 而不是 ||：数字 0（如 Gotify 优先级）不能被当成空值丢掉；留空的字段补上默认值
+      cleaned[key] = String(channel[key] ?? "").trim() || String(pushChannelDefaults[provider]?.[key] ?? "");
     }
   });
   return cleaned;
@@ -1177,11 +1193,9 @@ function cleanPushChannel(channel) {
 function shouldSavePushChannel(channel) {
   if (channel.enable) return true;
   return pushChannelFieldNames(channel.provider).some((key) => {
-    if (key === "smtp_ssl" || key === "msg_type" || key === "priority") return false;
+    if (key === "smtp_ssl" || key === "msg_type") return false;
     if (key === "smtp_port") return Number(channel[key] || 465) !== 465;
-    // message_format 默认是 text，只有用户主动改成 markdown 才算配置过
-    if (key === "message_format") return String(channel[key] || "") === "markdown";
-    return String(channel[key] || "").trim();
+    return pushFieldConfigured(channel, key);
   });
 }
 
