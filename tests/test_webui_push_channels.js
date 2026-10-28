@@ -142,6 +142,7 @@ test("every push provider has a button, so each can be tested on its own", () =>
       "dingrobot",
       "email",
       "feishubot",
+      "gotify",
       "pushplus",
       "qq",
       "qqbot",

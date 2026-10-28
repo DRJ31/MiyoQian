@@ -294,6 +294,7 @@ PUSH_CHANNEL_FIELDS: dict[str, tuple[str, ...]] = {
     "feishubot": ("webhook", "secret"),
     "wecombot": ("webhook", "plain_text"),
     "email": ("smtp_host", "smtp_port", "smtp_user", "smtp_password", "mail_from", "mail_to", "smtp_ssl"),
+    "gotify": ("server", "token", "priority"),
 }
 
 PUSH_CHANNEL_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -312,6 +313,7 @@ def normalize_push_channels(push: dict[str, Any]) -> list[dict[str, Any]]:
         "email",
         "qq",
         "qqbot",
+        "gotify",
     }
     raw_channels = push.get("channels")
     if not isinstance(raw_channels, list):
@@ -353,6 +355,8 @@ def should_keep_push_channel(channel: dict[str, Any]) -> bool:
     provider = str(channel.get("provider") or "")
     for field in PUSH_CHANNEL_FIELDS.get(provider, ()):
         if field == "smtp_ssl":
+            continue
+        if field == "priority":
             continue
         if field == "plain_text":
             if channel.get(field):
