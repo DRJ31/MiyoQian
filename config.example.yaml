@@ -109,9 +109,9 @@ push:
     # Gotify（自托管通知服务）
     - provider: gotify
       enable: false
-      server: "http://gotify.example.com"   # 服务器地址，不含 /message 路径
-      token: ""                              # App Token
-      priority: 5                            # 优先级 0-10，默认 5
+      server: ""          # 服务器地址，形如 https://gotify.example.com，不含 /message 路径
+      token: ""           # App Token
+      priority: 5         # 优先级 0-10，默认 5
 
 shop_exchange:
   enable: true

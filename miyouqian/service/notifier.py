@@ -16,6 +16,7 @@ from datetime import datetime
 from email.message import EmailMessage
 from typing import Any, Callable, Optional
 from urllib.parse import quote_plus
+from ..core.config import normalize_gotify_priority
 from ..core.onebot import OneBotHTTP
 from ..core.qq_bot import QQBot
 from ..core.captcha import DAMAGOU_BALANCE_INSUFFICIENT_MESSAGE
@@ -431,26 +432,28 @@ def send_gotify(client: httpx.Client, push: dict[str, Any], title: str, message:
     token = str(push.get("token") or "").strip()
     require(server, "server")
     require(token, "token")
-    priority = push.get("priority")
-    if priority is None:
-        priority = 5
-    else:
-        try:
-            priority = int(priority)
-        except (TypeError, ValueError):
-            priority = 5
-    request_json(
-        client,
-        "POST",
-        f"{server}/message?token={token}",
+    # token 放请求头而不是 ?token=：HTTPStatusError 的文本带完整 URL，会连同 token 一起进推送结果和日志
+    response = client.post(
+        f"{server}/message",
+        headers={"X-Gotify-Key": token},
         json={
             "title": title,
             "message": message,
-            "priority": priority,
+            "priority": normalize_gotify_priority(push.get("priority")),
             # Gotify 默认按纯文本展示，要让它渲染 Markdown 得显式声明 content type
             "extras": {"client::display": {"contentType": "text/markdown"}},
         },
+        # 公共 client 会跟随重定向，而 301/302 会把 POST 改成不带正文的 GET，还会把 token 带给跳转的目标主机
+        follow_redirects=False,
     )
+    if response.is_redirect:
+        raise ValueError(
+            f"Gotify 服务器返回了重定向（HTTP {response.status_code}），请检查服务器地址的 http/https 是否写对"
+        )
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise ValueError(f"Gotify 请求失败：HTTP {exc.response.status_code}") from None
 
 
 def build_push_html(title: str, message: str, success: bool) -> str:
